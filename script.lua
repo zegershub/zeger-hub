@@ -16,7 +16,7 @@ local USE_KEYWORDS = {
 }
 
 local CONFIG = {
-    walkspeed = 80,          -- скорость ходьбы к предмету
+    walkspeed = 40,          -- скорость ходьбы к предмету
     arriveDistance = 4,      -- на каком расстоянии считаем что дошли
     walkTimeout = 4,         -- максимум секунд на один предмет
     delayBetween = 0.4,
