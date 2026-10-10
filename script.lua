@@ -9,11 +9,20 @@ local KEYWORDS = {
     "true power","truepower","tomahawk"
 }
 
+local USE_KEYWORDS = {
+    "permanent","perma","potion of strength","strength",
+    "bull essence","frog potion","speed potion",
+    "fury sphere","true power","ice cube","heal"
+}
+
 local CONFIG = {
-    delayBetweenItems = 1.2,
-    waitAfterTP = 0.5,
-    maxPerCycle = 5,
-    checkPickup = true,
+    walkspeed = 80,          -- скорость ходьбы к предмету
+    arriveDistance = 4,      -- на каком расстоянии считаем что дошли
+    walkTimeout = 4,         -- максимум секунд на один предмет
+    delayBetween = 0.4,
+    maxPerCycle = 3,
+    autoUse = true,
+    useDelay = 0.15,
 }
 
 local looted = {}
@@ -30,19 +39,73 @@ local function chr()
     return nil
 end
 
-local function isLoot(inst)
-    if inst:IsDescendantOf(p.Character) then return false end
-    if Pl:GetPlayerFromCharacter(inst.Parent) then return false end
-    local n = inst.Name:lower()
-    for _, k in ipairs(KEYWORDS) do
+local function matches(name, list)
+    local n = name:lower()
+    for _, k in ipairs(list) do
         if n:find(k, 1, true) then return true end
     end
     return false
 end
 
+local function isLoot(inst)
+    if inst:IsDescendantOf(p.Character) then return false end
+    if Pl:GetPlayerFromCharacter(inst.Parent) then return false end
+    return matches(inst.Name, KEYWORDS)
+end
+
 local function getPart(inst)
     if inst:IsA("BasePart") then return inst end
     return inst:FindFirstChildWhichIsA("BasePart", true)
+end
+
+-- ходьба к точке без тп
+local function walkTo(pos)
+    local c, hum, root = chr()
+    if not hum or not root then return false end
+
+    local oldSpeed = hum.WalkSpeed
+    hum.WalkSpeed = CONFIG.walkspeed
+
+    local start = tick()
+    while tick() - start < CONFIG.walkTimeout do
+        if not run then break end
+        c, hum, root = chr()
+        if not root or not hum or hum.Health <= 0 then break end
+        local d = (root.Position - pos).Magnitude
+        if d <= CONFIG.arriveDistance then break end
+        pcall(function()
+            hum:MoveTo(pos)
+        end)
+        task.wait(0.05)
+    end
+
+    pcall(function() hum:MoveTo(root.Position) end)
+    pcall(function() hum.WalkSpeed = oldSpeed end)
+    return true
+end
+
+-- подбор через prompt/click/touch
+local function tryPickup(inst, root, part)
+    if inst.Parent and inst:FindFirstChildWhichIsA("ProximityPrompt", true) then
+        local prompt = inst:FindFirstChildWhichIsA("ProximityPrompt", true)
+        pcall(function()
+            prompt:InputHoldBegin()
+            task.wait(math.min(prompt.HoldDuration or 0.2, 0.8))
+            prompt:InputHoldEnd()
+        end)
+        task.wait(0.1)
+    end
+    if inst.Parent and inst:FindFirstChildWhichIsA("ClickDetector", true) and fireclickdetector then
+        pcall(function() fireclickdetector(inst:FindFirstChildWhichIsA("ClickDetector", true)) end)
+        task.wait(0.1)
+    end
+    if inst.Parent and firetouchinterest then
+        pcall(function()
+            firetouchinterest(root, part, 0)
+            task.wait()
+            firetouchinterest(root, part, 1)
+        end)
+    end
 end
 
 local function grab(inst)
@@ -55,51 +118,45 @@ local function grab(inst)
 
     looted[inst] = true
 
-    -- один тп без возврата
-    pcall(function()
-        root.CFrame = CFrame.new(part.Position + Vector3.new(0, 2, 0))
-    end)
+    walkTo(part.Position)
+    task.wait(0.25)
 
-    task.wait(CONFIG.waitAfterTP)
-
-    -- проверяем не собралось ли автоматически
-    if inst.Parent and CONFIG.checkPickup then
-        -- пробуем ProximityPrompt
-        local prompt = inst:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if prompt then
-            pcall(function()
-                prompt:InputHoldBegin()
-                task.wait(math.min(prompt.HoldDuration or 0.3, 1))
-                prompt:InputHoldEnd()
-            end)
-        end
+    if inst.Parent then
+        tryPickup(inst, root, part)
     end
 
-    if inst.Parent and CONFIG.checkPickup then
-        -- пробуем ClickDetector
-        local click = inst:FindFirstChildWhichIsA("ClickDetector", true)
-        if click and fireclickdetector then
-            pcall(function() fireclickdetector(click) end)
-            task.wait(0.2)
-        end
-    end
-
-    if inst.Parent and CONFIG.checkPickup and firetouchinterest then
-        -- touch в последнюю очередь
-        pcall(function()
-            firetouchinterest(root, part, 0)
-            task.wait()
-            firetouchinterest(root, part, 1)
-        end)
-        task.wait(0.2)
-    end
-
+    task.wait(0.15)
     return true
+end
+
+-- авто-использование перм баффов из бекпака
+local function useBuffs()
+    if not CONFIG.autoUse then return end
+    local c, hum = chr()
+    if not c or not hum then return end
+    local bp = p:FindFirstChild("Backpack")
+    if not bp then return end
+    for _, t in ipairs(bp:GetChildren()) do
+        if t:IsA("Tool") and matches(t.Name, USE_KEYWORDS) then
+            local ok = pcall(function()
+                hum:EquipTool(t)
+            end)
+            if ok then
+                task.wait(0.1)
+                pcall(function() t:Activate() end)
+                task.wait(CONFIG.useDelay)
+                -- снять и вернуть в бекпак если не израсходовался
+                if t.Parent == c then
+                    pcall(function() hum:UnequipTools() end)
+                end
+            end
+        end
+    end
 end
 
 task.spawn(function()
     while run do
-        task.wait(0.5)
+        task.wait(0.4)
         if not chr() then continue end
 
         local items = {}
@@ -112,29 +169,30 @@ task.spawn(function()
             end
         end
 
-        if #items == 0 then continue end
+        if #items > 0 then
+            local c, hum, root = chr()
+            if root then
+                table.sort(items, function(a, b)
+                    return (a.part.Position - root.Position).Magnitude
+                        < (b.part.Position - root.Position).Magnitude
+                end)
 
-        -- сортируем по расстоянию от нас
-        local c, hum, root = chr()
-        if not root then continue end
-        table.sort(items, function(a, b)
-            return (a.part.Position - root.Position).Magnitude
-                < (b.part.Position - root.Position).Magnitude
-        end)
-
-        local count = 0
-        for _, it in ipairs(items) do
-            if count >= CONFIG.maxPerCycle then break end
-            if not run then break end
-            if grab(it.inst) then
-                count = count + 1
-                task.wait(CONFIG.delayBetweenItems + math.random() * 0.3)
+                local count = 0
+                for _, it in ipairs(items) do
+                    if count >= CONFIG.maxPerCycle or not run then break end
+                    if grab(it.inst) then
+                        count = count + 1
+                        task.wait(CONFIG.delayBetween + math.random() * 0.2)
+                    end
+                end
             end
         end
+
+        useBuffs()
     end
 end)
 
 game:GetService("StarterGui"):SetCore("SendNotification", {
     Title = "ELAN",
-    Text = "loot online (safe mode)"
+    Text = "loot online (walk mode)"
 })
