@@ -2,7 +2,7 @@ local cG,TS,UIS,RS,Pl=game:GetService("CoreGui"),game:GetService("TweenService")
 if cG:FindFirstChild("ZegersHub_Premium") then cG.ZegersHub_Premium:Destroy() end
 local Th={Bg=Color3.fromRGB(4,2,8),Sb=Color3.fromRGB(10,4,16),Cd=Color3.fromRGB(15,6,24),Tx=Color3.fromRGB(255,255,255),Mu=Color3.fromRGB(140,130,160),On=Color3.fromRGB(0,255,160),Of=Color3.fromRGB(255,50,90)}
 local SG=Instance.new("ScreenGui",cG) SG.Name="ZegersHub_Premium" SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
-local MF=Instance.new("Frame",SG) MF.Name="MainFrame" MF.Size=UDim2.new(0,360,0,280) MF.Position=UDim2.new(0.1,0,0.3,0) MF.BackgroundColor3=Th.Bg MF.Active=true MF.Draggable=true MF.ClipsDescendants=true
+local MF=Instance.new("Frame",SG) MF.Name="MainFrame" MF.Size=UDim2.new(0,360,0,340) MF.Position=UDim2.new(0.1,0,0.3,0) MF.BackgroundColor3=Th.Bg MF.Active=true MF.Draggable=true MF.ClipsDescendants=true
 Instance.new("UICorner",MF).CornerRadius=UDim.new(0,16)
 local MS=Instance.new("UIStroke",MF) MS.Thickness=2
 local G1=Instance.new("UIStroke",MF) G1.Thickness=4 G1.Transparency=0.6
@@ -43,7 +43,8 @@ local HB,HD,HS,HG=cR("🎯  SOFT CYAN HITBOXES",1)
 local EB,ED,ES,EG=cR("👁️  CHROMA ESP AURA",2)
 local IB,ID,IS,IG=cR("📦  STATIC ITEMS LOCATOR",3)
 local KB,KD,KS,KG=cR("🛡️  LIGHT ANTI-KNOCK",4)
-getgenv().ZActive,getgenv().EActive,getgenv().IActive,getgenv().KActive=false,false,false,false
+local PB,PD,PS,PG=cR("🧪  AUTO POTION LOOT",5)
+getgenv().ZActive,getgenv().EActive,getgenv().IActive,getgenv().KActive,getgenv().PActive=false,false,false,false,false
 local rg,p=15.0,Pl.LocalPlayer
 local function aT(act,btn,dot,str,dtG)
     local tp=act and UDim2.new(1,-17,0.5,-7) or UDim2.new(0,3,0.5,-7)
@@ -88,6 +89,9 @@ end)
 KB.MouseButton1Click:Connect(function()
     getgenv().KActive=not getgenv().KActive aT(getgenv().KActive,KB,KD,KS,KG)
 end)
+PB.MouseButton1Click:Connect(function()
+    getgenv().PActive=not getgenv().PActive aT(getgenv().PActive,PB,PD,PS,PG)
+end)
 -- LIGHT ANTI-KNOCK
 local VEL_NAMES={Velocity=true,Knockback=true,knockback=true}
 local function isVel(v)
@@ -112,11 +116,81 @@ task.spawn(function()
         end
     end
 end)
+-- AUTO POTION LOOT
+local LOOT_KEYWORDS={
+    "potion of strength","strength",
+    "bull essence","bull",
+    "frog potion","frog",
+    "speed potion","speed",
+    "boba",
+    "permanent","perma",
+    "heal","health potion",
+    "ice cube","ice",
+    "fury sphere","fury",
+    "true power","true","tomahawk"
+}
+local looted={}
+local function isLoot(inst)
+    local n=inst.Name:lower()
+    for _ kw in ipairs(LOOT_KEYWORDS) do
+        if n:find(kw 1 true) then return true end
+    end
+    return false
+end
+local function grabItem(inst)
+    local char=p.Character
+    if not char then return end
+    local root=char:FindFirstChild("HumanoidRootPart")
+    local hum=char:FindFirstChildOfClass("Humanoid")
+    if not root or not hum then return end
+    if looted[inst] then return end
+    local part
+    if inst:IsA("BasePart") then part=inst
+    else part=inst:FindFirstChildWhichIsA("BasePart" true) end
+    if not part then return end
+    looted[inst]=true
+    local oldPos=root.CFrame
+    root.CFrame=part.CFrame+Vector3.new(0 3 0)
+    task.wait(0.06+math.random()*0.1)
+    if firetouchinterest then
+        pcall(function()
+            firetouchinterest(root part 0)
+            task.wait()
+            firetouchinterest(root part 1)
+        end)
+    end
+    local prompt=inst:FindFirstChildWhichIsA("ProximityPrompt" true)
+    if prompt then
+        pcall(function()
+            prompt:InputHoldBegin()
+            task.wait(prompt.HoldDuration or 0.1)
+            prompt:InputHoldEnd()
+        end)
+    end
+    local click=inst:FindFirstChildWhichIsA("ClickDetector" true)
+    if click and fireclickdetector then
+        pcall(function() fireclickdetector(click) end)
+    end
+    task.wait(0.05+math.random()*0.1)
+    if root and root.Parent then root.CFrame=oldPos end
+end
+task.spawn(function()
+    while task.wait(0.35) do
+        if getgenv().PActive then
+            for _,inst in ipairs(workspace:GetDescendants()) do
+                if isLoot(inst) then
+                    local ok=pcall(grabItem inst)
+                    if not ok then end
+                end
+            end
+        end
+    end
+end)
 local mV=true
 UIS.InputBegan:Connect(function(i,pr)
     if not pr and i.KeyCode==Enum.KeyCode.T then
         mV=not mV
-        local ts=mV and UDim2.new(0,360,0,280) or UDim2.new(0,360,0,0)
+        local ts=mV and UDim2.new(0,360,0,340) or UDim2.new(0,360,0,0)
         TS:Create(MF,TweenInfo.new(0.25,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{Size=ts}):Play()
         TC.Visible=mV S.Visible=mV
     end
@@ -148,6 +222,7 @@ RS.RenderStepped:Connect(function()
     if getgenv().EActive then ED.BackgroundColor3=Th.On EG.Color=Th.On ES.Color=Th.On else ES.Color=Color3.fromHSV((rHub+0.3)%1,0.4,0.4) end
     if getgenv().IActive then ID.BackgroundColor3=Th.On IG.Color=Th.On IS.Color=Th.On else IS.Color=Color3.fromHSV((rHub+0.6)%1,0.5,0.5) end
     if getgenv().KActive then KD.BackgroundColor3=Th.On KG.Color=Th.On KS.Color=Th.On else KS.Color=Color3.fromHSV((rHub+0.8)%1,0.5,0.5) end
+    if getgenv().PActive then PD.BackgroundColor3=Th.On PG.Color=Th.On PS.Color=Th.On else PS.Color=Color3.fromHSV((rHub+0.9)%1,0.5,0.5) end
     for _,pl in pairs(Pl:GetPlayers()) do
         if pl~=p and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart") and pl.Character:FindFirstChild("Humanoid") then
             local hrp=pl.Character.HumanoidRootPart
