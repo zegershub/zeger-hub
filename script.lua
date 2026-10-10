@@ -9,6 +9,13 @@ local KEYWORDS = {
     "true power","truepower","tomahawk"
 }
 
+local CONFIG = {
+    delayBetweenItems = 1.2,
+    waitAfterTP = 0.5,
+    maxPerCycle = 5,
+    checkPickup = true,
+}
+
 local looted = {}
 local run = true
 
@@ -24,6 +31,8 @@ local function chr()
 end
 
 local function isLoot(inst)
+    if inst:IsDescendantOf(p.Character) then return false end
+    if Pl:GetPlayerFromCharacter(inst.Parent) then return false end
     local n = inst.Name:lower()
     for _, k in ipairs(KEYWORDS) do
         if n:find(k, 1, true) then return true end
@@ -38,50 +47,88 @@ end
 
 local function grab(inst)
     local c, hum, root = chr()
-    if not root then return end
-    if looted[inst] then return end
-    local part = getPart(inst)
-    if not part then return end
-    looted[inst] = true
-    local old = root.CFrame
-    root.CFrame = part.CFrame + Vector3.new(0, 3, 0)
-    task.wait(0.06 + math.random() * 0.08)
+    if not root then return false end
+    if looted[inst] or not inst.Parent then return false end
 
-    if firetouchinterest then
+    local part = getPart(inst)
+    if not part then return false end
+
+    looted[inst] = true
+
+    -- один тп без возврата
+    pcall(function()
+        root.CFrame = CFrame.new(part.Position + Vector3.new(0, 2, 0))
+    end)
+
+    task.wait(CONFIG.waitAfterTP)
+
+    -- проверяем не собралось ли автоматически
+    if inst.Parent and CONFIG.checkPickup then
+        -- пробуем ProximityPrompt
+        local prompt = inst:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if prompt then
+            pcall(function()
+                prompt:InputHoldBegin()
+                task.wait(math.min(prompt.HoldDuration or 0.3, 1))
+                prompt:InputHoldEnd()
+            end)
+        end
+    end
+
+    if inst.Parent and CONFIG.checkPickup then
+        -- пробуем ClickDetector
+        local click = inst:FindFirstChildWhichIsA("ClickDetector", true)
+        if click and fireclickdetector then
+            pcall(function() fireclickdetector(click) end)
+            task.wait(0.2)
+        end
+    end
+
+    if inst.Parent and CONFIG.checkPickup and firetouchinterest then
+        -- touch в последнюю очередь
         pcall(function()
             firetouchinterest(root, part, 0)
             task.wait()
             firetouchinterest(root, part, 1)
         end)
+        task.wait(0.2)
     end
 
-    local prompt = inst:FindFirstChildWhichIsA("ProximityPrompt", true)
-    if prompt then
-        pcall(function()
-            prompt:InputHoldBegin()
-            task.wait(prompt.HoldDuration or 0.1)
-            prompt:InputHoldEnd()
-        end)
-    end
-
-    local click = inst:FindFirstChildWhichIsA("ClickDetector", true)
-    if click and fireclickdetector then
-        pcall(function() fireclickdetector(click) end)
-    end
-
-    task.wait(0.04 + math.random() * 0.08)
-    if root and root.Parent then
-        root.CFrame = old
-    end
+    return true
 end
 
 task.spawn(function()
-    while task.wait(0.3) do
-        if not run then continue end
+    while run do
+        task.wait(0.5)
         if not chr() then continue end
+
+        local items = {}
         for _, inst in ipairs(workspace:GetDescendants()) do
-            if isLoot(inst) then
-                pcall(grab, inst)
+            if isLoot(inst) and not looted[inst] then
+                local part = getPart(inst)
+                if part then
+                    table.insert(items, {inst = inst, part = part})
+                end
+            end
+        end
+
+        if #items == 0 then continue end
+
+        -- сортируем по расстоянию от нас
+        local c, hum, root = chr()
+        if not root then continue end
+        table.sort(items, function(a, b)
+            return (a.part.Position - root.Position).Magnitude
+                < (b.part.Position - root.Position).Magnitude
+        end)
+
+        local count = 0
+        for _, it in ipairs(items) do
+            if count >= CONFIG.maxPerCycle then break end
+            if not run then break end
+            if grab(it.inst) then
+                count = count + 1
+                task.wait(CONFIG.delayBetweenItems + math.random() * 0.3)
             end
         end
     end
@@ -89,5 +136,5 @@ end)
 
 game:GetService("StarterGui"):SetCore("SendNotification", {
     Title = "ELAN",
-    Text = "royale auto loot online"
+    Text = "loot online (safe mode)"
 })
